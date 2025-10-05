@@ -1,0 +1,119 @@
+"""
+paint_transport_LP.py
+Author: Giwa Iziomo
+Project: Mathematical Modelling — Network Flow Optimisation (Transportation Problem)
+
+Description:
+Determines the minimum-cost weekly transport schedule for a UK paint manufacturer.
+Two factories supply paint either directly to five wholesalers or through three warehouses.
+Model type: Linear Programming (LP)
+Solver: CBC (default PuLP solver)
+"""
+
+import pulp
+
+# -----------------------------
+# 1. Sets and Data
+# -----------------------------
+
+suppliers = ["Bristol", "Leeds", "London", "Birmingham", "Glasgow"]
+destinations = [
+    "London", "Birmingham", "Glasgow",
+    "Wholesaler 1", "Wholesaler 2", "Wholesaler 3", "Wholesaler 4", "Wholesaler 5"
+]
+
+# Transportation cost (£ per ton)
+# Infeasible routes assigned a prohibitive cost of £500/t
+cost = {
+    ("Bristol", "London"): 25, ("Bristol", "Birmingham"): 23,
+    ("Bristol", "Glasgow"): 500, ("Bristol", "Wholesaler 1"): 80,
+    ("Bristol", "Wholesaler 2"): 500, ("Bristol", "Wholesaler 3"): 90,
+    ("Bristol", "Wholesaler 4"): 100, ("Bristol", "Wholesaler 5"): 86,
+
+    ("Leeds", "London"): 30, ("Leeds", "Birmingham"): 27, ("Leeds", "Glasgow"): 30,
+    ("Leeds", "Wholesaler 1"): 500, ("Leeds", "Wholesaler 2"): 70,
+    ("Leeds", "Wholesaler 3"): 54, ("Leeds", "Wholesaler 4"): 500,
+    ("Leeds", "Wholesaler 5"): 100,
+
+    ("London", "London"): 500, ("London", "Birmingham"): 500, ("London", "Glasgow"): 500,
+    ("London", "Wholesaler 1"): 37, ("London", "Wholesaler 2"): 31,
+    ("London", "Wholesaler 3"): 500, ("London", "Wholesaler 4"): 40,
+    ("London", "Wholesaler 5"): 44,
+
+    ("Birmingham", "London"): 500, ("Birmingham", "Birmingham"): 500, ("Birmingham", "Glasgow"): 500,
+    ("Birmingham", "Wholesaler 1"): 36, ("Birmingham", "Wholesaler 2"): 40,
+    ("Birmingham", "Wholesaler 3"): 43, ("Birmingham", "Wholesaler 4"): 40,
+    ("Birmingham", "Wholesaler 5"): 46,
+
+    ("Glasgow", "London"): 500, ("Glasgow", "Birmingham"): 500, ("Glasgow", "Glasgow"): 500,
+    ("Glasgow", "Wholesaler 1"): 45, ("Glasgow", "Wholesaler 2"): 42,
+    ("Glasgow", "Wholesaler 3"): 30, ("Glasgow", "Wholesaler 4"): 500,
+    ("Glasgow", "Wholesaler 5"): 36,
+}
+
+# Supply limits (tons)
+supply = {"Bristol": 40000, "Leeds": 50000, "London": 20000,
+          "Birmingham": 15000, "Glasgow": 12000}
+
+# Demand requirements (tons)
+demand = {
+    "London": 20000, "Birmingham": 15000, "Glasgow": 12000,
+    "Wholesaler 1": 15000, "Wholesaler 2": 20000, "Wholesaler 3": 13000,
+    "Wholesaler 4": 14000, "Wholesaler 5": 16000
+}
+
+# -----------------------------
+# 2. Model Definition
+# -----------------------------
+
+model = pulp.LpProblem("Paint_Transportation_3_Warehouses", pulp.LpMinimize)
+
+# Decision variables: quantity shipped from supplier i to destination j (tons)
+x = pulp.LpVariable.dicts("ship", (suppliers, destinations),
+                          lowBound=0, cat="Continuous")
+
+# Objective function: minimise total weekly transport cost
+model += pulp.lpSum(cost[(i, j)] * x[i][j]
+                    for i in suppliers for j in destinations if (i, j) in cost)
+
+# -----------------------------
+# 3. Constraints
+# -----------------------------
+
+# Supply constraints: total shipments from each supplier ≤ its capacity
+for i in suppliers:
+    model += pulp.lpSum(x[i][j] for j in destinations if (i, j) in cost) <= supply[i], f"Supply_{i}"
+
+# Demand constraints: total inflow to each destination ≥ its requirement
+for j in destinations:
+    model += pulp.lpSum(x[i][j] for i in suppliers if (i, j) in cost) >= demand[j], f"Demand_{j}"
+
+# Non-negativity handled automatically by PuLP via lowBound=0
+
+# -----------------------------
+# 4. Solve
+# -----------------------------
+
+model.solve(pulp.PULP_CBC_CMD(msg=False))
+
+# -----------------------------
+# 5. Results
+# -----------------------------
+
+print("Status:", pulp.LpStatus[model.status])
+print(f"Minimum total weekly transport cost: £{pulp.value(model.objective):,.0f}\n")
+
+print("Optimal Shipment Plan (only non-zero routes):")
+print("-" * 65)
+for i in suppliers:
+    for j in destinations:
+        if (i, j) in cost and x[i][j].value() > 1e-6:
+            tons = x[i][j].value()
+            route_cost = cost[(i, j)]
+            print(f"{i:<10} → {j:<12} : {tons:8,.0f} tons  @ £{route_cost}/t   (£{tons*route_cost:,.0f})")
+
+# Optional: to save results to a CSV or display in a DataFrame if needed
+# import pandas as pd
+# results = [(i, j, x[i][j].value(), cost[(i, j)]) for i in suppliers for j in destinations if (i, j) in cost]
+# df = pd.DataFrame(results, columns=["From", "To", "Tons", "Cost_per_ton"])
+# df.to_csv("LP_optimal_routes.csv", index=False)
